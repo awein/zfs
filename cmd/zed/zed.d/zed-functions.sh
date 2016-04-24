@@ -199,6 +199,10 @@ zed_notify()
     [ "${rv}" -eq 0 ] && num_success=$((num_success + 1))
     [ "${rv}" -eq 1 ] && num_failure=$((num_failure + 1))
 
+    zed_notify_pushover "${subject}" "${pathname}"; rv=$?
+    [ "${rv}" -eq 0 ] && num_success=$((num_success + 1))
+    [ "${rv}" -eq 1 ] && num_failure=$((num_failure + 1))
+    
     [ "${num_success}" -gt 0 ] && return 0
     [ "${num_failure}" -gt 0 ] && return 1
     return 2
@@ -350,6 +354,71 @@ zed_notify_pushbullet()
         | sed -n -e 's/.*"error" *:.*"message" *: *"\([^"]*\)".*/\1/p')"
     if [ -n "${msg_err}" ]; then
         zed_log_err "pushbullet \"${msg_err}"\"
+        return 1
+    fi
+    return 0
+}
+
+
+# zed_notify_pushover (subject, pathname)
+#
+# Send a notification via Pushover <https://pushover.net>.
+# The API token (ZED_PUSHOVER_API_TOKEN) identifies this client to the server.
+# The user token (ZED_PUSHOVER_USER_KEY) identifies the user to send the 
+# notification to.
+#
+# Requires curl and cat executables to be installed in the standard PATH.
+#
+# References
+#   https://pushover.net/api
+#
+# Arguments
+#   subject: notification subject
+#   pathname: pathname containing the notification message (OPTIONAL)
+#
+# Globals
+#   ZED_PUSHOVER_API_TOKEN
+#   ZED_PUSHOVER_USER_KEY
+#
+# Return
+#   0: notification sent
+#   1: notification failed
+#   2: not configured
+#
+zed_notify_pushover()
+{
+    local subject="$1"
+    local pathname="${2:-"/dev/null"}"
+    local msg
+    local msg_out
+    local url="https://api.pushover.net/1/messages.json"
+
+    [ -n "${ZED_PUSHOVER_API_TOKEN}" ] || return 2
+    [ -n "${ZED_PUSHOVER_USER_KEY}" ] || return 2
+
+    [ -n "${subject}" ] || return 1
+    if [ ! -r "${pathname}" ]; then
+        zed_log_err "pushover cannot read \"${pathname}\""
+        return 1
+    fi
+
+    zed_check_cmd "cat" "curl" || return 1
+
+    # Construct the message
+    #
+    msg=`cat "$pathname"`
+
+    # Send the request and check for errors.
+    #
+    msg_out="$(curl -s \
+        --form-string "token=${ZED_PUSHOVER_API_TOKEN}" \
+        --form-string "user=${ZED_PUSHOVER_USER_KEY}" \
+        --form-string "title=${subject}" \
+        --form-string "message=${msg}" \
+        "${url}"
+        2>/dev/null)"; rv=$?
+    if [ "${rv}" -ne 0 ]; then
+        zed_log_err "curl exit=${rv}"
         return 1
     fi
     return 0
